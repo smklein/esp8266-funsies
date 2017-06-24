@@ -68,27 +68,36 @@ const unsigned long postRate = 30000;
 unsigned long lastPost = 0;
 unsigned long lastSerial = 0;
 
-void displayTest() {
-  // Draw a single pixel
-  display.clearDisplay();
-  display.drawPixel(10, 10, WHITE);
-  display.display();
-  delay(2000);
+char topStatus[22] = "Sean's Trash";
+char medStatus[11] = "Qrys: 0";
+char lowStatus[22] = "Wifi: Off";
 
-  // Draw some text
+void printCapped(char* str, size_t cap) {
+  if (strlen(str) > cap) {
+    str[cap] = '.';
+    str[cap - 1] = '.';
+    str[cap - 2] = '.';
+  }
+  display.println(str);
+}
+
+void draw() {
   display.clearDisplay();
-  display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
-  for (uint8_t i = 0; i < 168; i++) {
-    if (i == '\n') continue;
-    display.write(i);
-    if ((i > 0) && (i % 21 == 0)) {
-      display.println();
-    }
-  }
+  display.setTextSize(1);
+  printCapped(topStatus, 21);
+  /*
+  display.stopscroll();
+  display.startscrollright(0x00, 0x08);
+   */
+  display.setTextSize(2);
+  display.setCursor(0, 8);
+  printCapped(medStatus, 10);
+  display.setTextSize(1);
+  display.setCursor(0, 24);
+  printCapped(lowStatus, 21);
   display.display();
-  delay(2000);
 }
 
 void initHardware() {
@@ -109,7 +118,7 @@ void setup() {
   initHardware();
   connectWiFi();
   digitalWrite(LED_PIN, HIGH);
-  displayTest();
+  draw();
 }
 
 void gmapsQuery() {
@@ -148,9 +157,16 @@ void gmapsQuery() {
   Serial.println("Duration In Traffic: " + durationInTraffic);
 }
 
+size_t queryCount = 0;
+
 void loop() {
   if (lastPost + postRate <= millis()) {
     gmapsQuery();
+    queryCount++;
+    char buf[4];
+    snprintf(buf, sizeof(buf), "%lu", queryCount);
+    strcpy(medStatus + strlen("Qrys: "), buf);
+    lastPost = millis();
     /*
     if (postToPhant() == NO_ERROR) {
       lastPost = millis();
@@ -163,6 +179,7 @@ void loop() {
   if (lastSerial + serialRate <= millis()) {
     Serial.print("...");
     lastSerial = millis();
+    draw();
   }
 }
 
@@ -194,6 +211,8 @@ void connectWiFi() {
     // Add delays -- allowing the processor to perform other
     // tasks -- wherever possible.
   }
+  memset(lowStatus, 0, sizeof(lowStatus));
+  strcpy(lowStatus, "Wifi: On");
   Serial.print("Connected to WiFi!\n");
 }
 

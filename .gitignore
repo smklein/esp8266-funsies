@@ -33,3 +33,6 @@
 
 # Private keys
 *keys.h
+
+# Vimisms
+*.swp
