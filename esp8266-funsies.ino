@@ -13,8 +13,8 @@
 #include <Adafruit_SSD1306.h>
 
 // HTTPS
-#include <GoogleMapsDirectionsApi.h>
 #include <GoogleMapsApi.h>
+#include <GoogleMapsDirectionsApi.h>
 #include <WiFiClientSecure.h>
 
 #define NO_ERROR 0
@@ -143,12 +143,11 @@ void gmapsQuery() {
   DirectionsInputOptions options;
   options.departureTime = "now";
   options.trafficModel = "best_guess";
-  DirectionsResponse response = gmaps_api.directionsApi(origin, destination, options);
+  DirectionsResponse response =
+      gmaps_api.directionsApi(origin, destination, options);
 
-  snprintf(topStatus, sizeof(topStatus), "%s%s%s%s   ",
-           "Traffic from ",
-           response.start_address.c_str(),
-           " to ",
+  snprintf(topStatus, sizeof(topStatus), "%s%s%s%s   ", "Traffic from ",
+           response.start_address.c_str(), " to ",
            response.end_address.c_str());
 
   snprintf(medStatus, sizeof(medStatus), "%s",
