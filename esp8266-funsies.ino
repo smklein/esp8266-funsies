@@ -57,29 +57,43 @@ Adafruit_SSD1306 display(OLED_RESET);
 /////////////////
 WiFiClientSecure client;
 GoogleMapsDirectionsApi gmaps_api(GMAPS_API_KEY, client);
-unsigned long api_mtbs = 60000;  // mean time between api requests
-unsigned long api_due_time = 0;
 bool firstTime = true;
 
 /////////////////
 // Post Timing //
 /////////////////
 const unsigned long serialRate = 2000;
-const unsigned long postRate = 10000;
+const unsigned long postRate = 20000;
 unsigned long lastPost = 0;
 unsigned long lastSerial = 0;
 
-char topStatus[22] = "Sean's Trash";
-char medStatus[11] = "Qrys: 0";
+size_t topStatusIndex = 0;
+char topStatus[512] = "Welcome!";
+char medStatus[11] = "...";
 char lowStatus[22] = "Wifi: Off";
 
 void printCapped(char* str, size_t cap) {
-  if (strlen(str) > cap) {
-    str[cap] = '.';
-    str[cap - 1] = '.';
-    str[cap - 2] = '.';
+  char buf[30];
+  strncpy(buf, str, cap - 1);
+  buf[cap] = '\0';
+  display.print(buf);
+}
+
+void printCappedRing(char* str, size_t start, size_t cap) {
+  char buf[30];
+  size_t strLen = strlen(str);
+  // Copy the tail end of the string to the buffer
+  int tailLen = (strLen - start);
+  tailLen = (tailLen > cap ? cap : tailLen);
+  strncpy(buf, str + start, tailLen);
+  if (tailLen < cap) {
+    int headLen = cap - tailLen;
+    if (headLen > 0) {
+      strncpy(buf + tailLen, str, headLen);
+    }
   }
-  display.println(str);
+  buf[cap] = '\0';
+  display.print(buf);
 }
 
 void draw() {
@@ -87,11 +101,16 @@ void draw() {
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
   display.setTextSize(1);
-  printCapped(topStatus, 21);
-  /*
-  display.stopscroll();
-  display.startscrollright(0x00, 0x08);
-   */
+
+  if (strlen(topStatus) < 21) {
+    printCapped(topStatus, 21);
+  } else {
+    printCappedRing(topStatus, topStatusIndex++, 21);
+    if (topStatusIndex == strlen(topStatus)) {
+      topStatusIndex = 0;
+    }
+  }
+
   display.setTextSize(2);
   display.setCursor(0, 8);
   printCapped(medStatus, 10);
@@ -136,7 +155,38 @@ void gmapsQuery() {
   DirectionsInputOptions options;
   options.departureTime = "now";
   options.trafficModel = "best_guess";
-  String responseString = gmaps_api.directionsApi(origin, destination, options);
+  DirectionsResponse response = gmaps_api.directionsApi(origin, destination, options);
+
+  snprintf(topStatus, sizeof(topStatus), "%s%s%s%s   ",
+           "Traffic from ",
+           response.start_address.c_str(),
+           " to ",
+           response.end_address.c_str());
+
+  snprintf(medStatus, sizeof(medStatus), "%s",
+           response.durationTraffic_text.c_str());
+
+  Serial.println("Response:");
+  Serial.print("Trafic from ");
+  Serial.print(response.start_address);
+  Serial.print(" to ");
+  Serial.println(response.end_address);
+
+  Serial.print("Duration in Traffic text: ");
+  Serial.println(response.durationTraffic_text);
+  Serial.print("Duration in Traffic in minutes: ");
+  Serial.println(response.durationTraffic_value / 60);
+
+  Serial.print("Normal duration text: ");
+  Serial.println(response.duration_text);
+  Serial.print("Normal duration in minutes: ");
+  Serial.println(response.duration_value / 60);
+
+  Serial.print("Distance text: ");
+  Serial.println(response.distance_text);
+  Serial.print("Distance in meters: ");
+  Serial.println(response.distance_value);
+  /*
   Serial.println("Response String Length: ");
   Serial.println(responseString.length());
 
@@ -164,32 +214,26 @@ void gmapsQuery() {
   Serial.println("Distance: " + distance);
   Serial.println("Duration: " + duration);
   Serial.println("Duration In Traffic: " + durationInTraffic);
+  */
 }
 
-size_t queryCount = 0;
-
 void loop() {
-  if (lastPost + postRate <= millis()) {
+  if (firstTime || lastPost + postRate <= millis()) {
+    memset(topStatus, 0, sizeof(topStatus));
+    strcpy(topStatus, "Recalculating...");
+    draw();
     gmapsQuery();
-    queryCount++;
-    char buf[4];
-    snprintf(buf, sizeof(buf), "%lu", queryCount);
-    strcpy(medStatus + strlen("Qrys: "), buf);
     lastPost = millis();
-    /*
-    if (postToPhant() == NO_ERROR) {
-      lastPost = millis();
-    } else {
-      delay(100);
-    }
-    */
+    firstTime = false;
   }
 
   if (lastSerial + serialRate <= millis()) {
     Serial.print("...");
     lastSerial = millis();
-    draw();
   }
+
+  delay(30);
+  draw();
 }
 
 void connectWiFi() {
