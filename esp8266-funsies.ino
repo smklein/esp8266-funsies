@@ -16,6 +16,7 @@
 #include <Adafruit_SSD1306.h>
 
 // HTTPS
+#include <GoogleMapsDirectionsApi.h>
 #include <GoogleMapsApi.h>
 #include <WiFiClientSecure.h>
 
@@ -55,7 +56,7 @@ Adafruit_SSD1306 display(OLED_RESET);
 // Google Maps //
 /////////////////
 WiFiClientSecure client;
-GoogleMapsApi gmaps_api(GMAPS_API_KEY, client);
+GoogleMapsDirectionsApi gmaps_api(GMAPS_API_KEY, client);
 unsigned long api_mtbs = 60000;  // mean time between api requests
 unsigned long api_due_time = 0;
 bool firstTime = true;
@@ -64,7 +65,7 @@ bool firstTime = true;
 // Post Timing //
 /////////////////
 const unsigned long serialRate = 2000;
-const unsigned long postRate = 30000;
+const unsigned long postRate = 10000;
 unsigned long lastPost = 0;
 unsigned long lastSerial = 0;
 
@@ -124,22 +125,30 @@ void setup() {
 void gmapsQuery() {
   Serial.println("Querying Google Maps");
   // Inputs
-  String origin = "Galway";
-  String destination = "Dublin,Ireland";
-  String waypoints =
-      "via:Cork,Ireland";  // You need to include the via: before your waypoint
+  // TODO(smklein): I don't think the client library deals
+  // spaces all too well.
+  String origin = "Sunnyvale";
+  String destination = "Googleplex";
 
   // These are all optional (although departureTime needed for traffic)
   String departureTime = "now";        // can also be a future timestamp
   String trafficModel = "best_guess";  // Defaults to this anyways
-  String responseString = gmaps_api.distanceMatrix(origin, destination,
-                                                   departureTime, trafficModel);
-  DynamicJsonBuffer jsonBuffer;
+  DirectionsInputOptions options;
+  options.departureTime = "now";
+  options.trafficModel = "best_guess";
+  String responseString = gmaps_api.directionsApi(origin, destination, options);
+  Serial.println("Response String Length: ");
+  Serial.println(responseString.length());
+
+  // XXX with your.. modifications to the gmaps lib, I think
+  // things might be failing due to low memory issues... hrm..
+  DynamicJsonBuffer jsonBuffer(responseString.length());
   JsonObject& response = jsonBuffer.parseObject(responseString);
   if (!response.success()) {
     Serial.println("Failed to parse Json");
     return;
   }
+
   if (!response.containsKey("rows")) {
     Serial.println("Reponse did not contain rows");
     return;
