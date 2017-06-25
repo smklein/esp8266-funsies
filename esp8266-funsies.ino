@@ -5,9 +5,6 @@
 // Arduino WiFi library.)
 #include <ESP8266WiFi.h>
 
-// Include the SparkFun Phant library.
-#include <Phant.h>
-
 // I2C (for LCD)
 #include <Wire.h>
 
@@ -36,15 +33,6 @@ const char WiFiPSK[] = WIFI_PASS;
 const int LED_PIN = 5;       // Thing's onboard, green LED
 const int ANALOG_PIN = A0;   // The only analog pin on the Thing
 const int DIGITAL_PIN = 12;  // Digital pin to be read
-
-////////////////
-// Phant Keys //
-////////////////
-const char PhantHost[] = "data.sparkfun.com";
-const char PhantPublicKey[] = "wpvZ9pE1qbFJAjaGd3bn";
-const char PhantPrivateKey[] = PHANT_PRIVATE_KEY;
-
-const char GoogleHost[] = "www.google.com";
 
 ///////////////
 // LCD Setup //
@@ -219,7 +207,6 @@ void gmapsQuery() {
 
 void loop() {
   if (firstTime || lastPost + postRate <= millis()) {
-    memset(topStatus, 0, sizeof(topStatus));
     strcpy(topStatus, "Recalculating...");
     draw();
     gmapsQuery();
@@ -267,52 +254,4 @@ void connectWiFi() {
   memset(lowStatus, 0, sizeof(lowStatus));
   strcpy(lowStatus, "Wifi: On");
   Serial.print("Connected to WiFi!\n");
-}
-
-int postToPhant() {
-  Serial.print("Posting to Phant...\n");
-  // LED turns on when we enter, it'll go off when we successfully post.
-  digitalWrite(LED_PIN, HIGH);
-
-  // Declare an object from the Phant library - phant
-  Phant phant(PhantHost, PhantPublicKey, PhantPrivateKey);
-
-  // Do a little work to get a unique-ish name. Append the
-  // last two bytes of the MAC (HEX'd) to "Thing-":
-  uint8_t mac[WL_MAC_ADDR_LENGTH];
-  WiFi.macAddress(mac);
-  String macID = String(mac[WL_MAC_ADDR_LENGTH - 2], HEX) +
-                 String(mac[WL_MAC_ADDR_LENGTH - 1], HEX);
-  macID.toUpperCase();
-  String postedID = "SK-Thing-" + macID;
-
-  // Add the four field/value pairs defined by our stream:
-  phant.add("id", postedID);
-  phant.add("analog", analogRead(ANALOG_PIN));
-  phant.add("digital", digitalRead(DIGITAL_PIN));
-  phant.add("time", millis());
-
-  // Now connect to data.sparkfun.com, and post our data:
-  WiFiClient pclient;
-  const int httpPort = 443;
-  if (!pclient.connect(PhantHost, httpPort)) {
-    return -1;
-  }
-  // If we successfully connected, print our Phant post:
-  pclient.print(phant.post());
-
-  // Read all the lines of the reply from server and print them to Serial
-  delay(1000);
-  while (pclient.available()) {
-    String line = pclient.readStringUntil('\r');
-    Serial.print(line);  // Trying to avoid using serial
-  }
-  Serial.print("Posted to phant (success)\n");
-  pclient.stop();
-
-  // Before we exit, turn the LED off.
-  digitalWrite(LED_PIN, LOW);
-
-  Serial.print("Posted to googs (success)\n");
-  return NO_ERROR;
 }
