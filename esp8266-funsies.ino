@@ -12,9 +12,11 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// HTTPS
+// Maps
 #include <GoogleMapsApi.h>
 #include <GoogleMapsDirectionsApi.h>
+
+// Https
 #include <WiFiClientSecure.h>
 
 #define NO_ERROR 0
@@ -45,7 +47,6 @@ Adafruit_SSD1306 display(OLED_RESET);
 /////////////////
 WiFiClientSecure client;
 GoogleMapsDirectionsApi gmaps_api(GMAPS_API_KEY, client);
-bool firstTime = true;
 
 /////////////////
 // Post Timing //
@@ -71,7 +72,7 @@ void printCappedRing(char* str, size_t start, size_t cap) {
   char buf[30];
   size_t strLen = strlen(str);
   // Copy the tail end of the string to the buffer
-  int tailLen = (strLen - start);
+  size_t tailLen = (strLen - start);
   tailLen = (tailLen > cap ? cap : tailLen);
   strncpy(buf, str + start, tailLen);
   if (tailLen < cap) {
@@ -129,13 +130,218 @@ void setup() {
   draw();
 }
 
+// TODO(smklein): Refactor this into a headless auth library
+
+#define GACCOUNT_HOST "accounts.google.com"
+#define GACCOUNT_SSL_PORT 443
+
+#define GCAL_SCOPE "https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar"
+
+char oathDeviceCode[1024];
+char oathUserCode[128];
+char accessToken[1024];
+
+String sendPostCommand(const String& host, int port,
+                       const String& endpoint, const String& command) {
+  if (!client.connect(host.c_str(), port)) {
+    return "";
+  }
+  client.println("POST " + endpoint + " HTTP/1.1");
+  client.println("Host: " + host);
+  client.println("User-Agent: Arduino/1.0");
+  client.print("Content-Length: ");
+  client.println(command.length());
+  client.println("Content-Type: application/x-www-form-urlencoded");
+  client.println();
+  client.println(command);
+
+
+  // TODO(smklein): Technically, we shouldn't be reading chunks unless
+  // we see "Transfer-Encoding: chunked" in the header...
+  bool reading_header = true;
+  bool reading_chunk = false;
+  String header = "";
+  String chunkLen = "";
+  String body = "";
+
+  long start = millis();
+  while (millis() - start < 1500) {
+    while (client.available()) {
+      char c = client.read();
+      if (reading_header) {
+        header += c;
+      } else if (reading_chunk) {
+        chunkLen += c;
+      } else {
+        body += c;
+      }
+
+      if (reading_header && header.endsWith("\r\n\r\n")) {
+        reading_header = false;
+        reading_chunk = true;
+      } else if (reading_chunk && chunkLen.endsWith("\r\n")) {
+        reading_chunk = false;
+        chunkLen = "";
+      } else if (!reading_header && !reading_chunk && body.endsWith("\r\n")) {
+        reading_chunk = true;
+        body.trim();
+      }
+    }
+    if (header != "" || body != "") {
+      break;
+    }
+  }
+  Serial.println("Message received from query: ");
+  Serial.println(header);
+  Serial.println("---");
+  Serial.println(body);
+  return body;
+}
+
+int deviceAndUserCodeQuery() {
+  Serial.println("Querying for device and user codes");
+
+  String command =
+    "client_id=" GCAL_CLIENT_ID \
+    "&scope=" GCAL_SCOPE;
+
+  String responseString = sendPostCommand(GACCOUNT_HOST, GACCOUNT_SSL_PORT,
+                                          "/o/oauth2/device/code", command);
+  if (responseString == "") {
+    Serial.println("Failed to send request to server");
+    return -1;
+  }
+
+  Serial.println("Response from POST: ");
+  Serial.println(responseString);
+
+  DynamicJsonBuffer jsonBuffer;
+  JsonObject& response = jsonBuffer.parseObject(responseString);
+  if (!response.success()) {
+    Serial.println("Failed to parse response");
+    return -1;
+  }
+  Serial.println("Parsed JSON successfully");
+  if (!response.containsKey("device_code") || !response.containsKey("user_code")) {
+    Serial.println("JSON does not contain desired codes");
+    return -1;
+  }
+  strncpy(oathDeviceCode, response["device_code"], sizeof(oathDeviceCode));
+  strncpy(oathUserCode, response["user_code"], sizeof(oathUserCode));
+
+  Serial.print("Device Code: ");
+  Serial.println(String(oathDeviceCode));
+
+  Serial.print("User Code: ");
+  Serial.println(String(oathUserCode));
+
+  /*
+     https://developers.google.com/identity/protocols/OAuth2ForDevices
+     TODO(smklein): Parse the following
+     - "device_code": Will be used to refer to device asking for access
+     - "user_code": Must be displayed to user, presented at verification url
+     - "verification_url": Must be accessed by user
+     - "expires_in": Restart after this amount of time
+     - "interval": Interval this device should (minimally) wait between polling
+       for authenticated access
+   */
+
+  return 0;
+}
+
+#define GCAL_HOST "www.googleapis.com"
+#define GCAL_SSL_PORT 443
+
+int accessTokenQuery() {
+  Serial.println("Polling for authentication confirmation, access token");
+  String command =
+    "client_id=" GCAL_CLIENT_ID \
+    "&client_secret=" GCAL_CLIENT_SECRET \
+    "&grant_type=http://oauth.net/grant_type/device/1.0";
+
+  command += "&code=" + String(oathDeviceCode);
+
+  String responseString = sendPostCommand(GCAL_HOST, GCAL_SSL_PORT,
+                                          "/oauth2/v4/token", command);
+
+  if (responseString == "") {
+    return -1;
+  }
+
+  DynamicJsonBuffer jsonBuffer;
+  JsonObject& response = jsonBuffer.parseObject(responseString);
+  if (!response.success()) {
+    Serial.println("Failed to parse response");
+    return -1;
+  }
+  Serial.println("Parsed JSON successfully");
+
+  if (response.containsKey("error")) {
+    String responseError = response["error"];
+    Serial.print("Cannot acquire access token due to error: ");
+    Serial.println(responseError);
+    return -1;
+  }
+
+  if (!response.containsKey("access_token")) {
+    Serial.println("Response does not contain access token\n");
+    return -1;
+  }
+  strncpy(accessToken, response["access_token"], sizeof(accessToken));
+
+  Serial.print("Access Token: ");
+  Serial.println(String(accessToken));
+  /*
+     https://developers.google.com/identity/protocols/OAuth2ForDevices
+     TODO(smklein): Parse the following
+     - "access_token": Used for future gcal requests
+     - "refresh_token": Mechanism to refresh access token
+        TODO: do this too; store in EEPROM?
+        https://github.com/esp8266/Arduino/blob/master/libraries/EEPROM
+     - "expires_in": Lifetime in seconds
+   */
+  return 0;
+}
+
+void gcalQuery() {
+  Serial.println("Querying Google Calendar");
+  String command =
+    "GET https://www.googleapis.com/calendar/v3/calendars/primary/events?" \
+    "orderBy=startTime" \
+    "&singleEvents=true" \
+    "&timeMax=2017-07-05T00%3A00%3A00-07%3A00" \
+    "&timeMin=2017-07-04T00%3A00%3A00-07%3A00";
+
+  command += "&access_token=" + String(accessToken);
+
+  String body = "";
+
+  if (client.connect(GCAL_HOST, GCAL_SSL_PORT)){
+    Serial.println("... Connected to server");
+    client.println(command);
+
+    long start = millis();
+    while (millis() - start < 1500) {
+      while (client.available()) {
+        char c = client.read();
+        body += c;
+      }
+      if (body != "") {
+        break;
+      }
+    }
+    Serial.println("Message received from query: ");
+    Serial.println(body);
+  }
+
+  // TODO not reading the body correctly here...
+}
+
 void gmapsQuery() {
   Serial.println("Querying Google Maps");
   // Inputs
-  // TODO(smklein): I don't think the client library deals
-  // spaces all too well.
-  String origin = "Sunnyvale";
-  String destination = "Googleplex";
+  String origin = "AMD Sunnyvale";
+  String destination = "Google Building 1842";
 
   // These are all optional (although departureTime needed for traffic)
   String departureTime = "now";        // can also be a future timestamp
@@ -204,13 +410,43 @@ void gmapsQuery() {
   */
 }
 
+enum {
+  STATE_INIT,
+  STATE_ACCESS_TOKEN_QUERY,
+  STATE_AUTHENTICATED,
+} state = STATE_INIT;
+
 void loop() {
-  if (firstTime || lastPost + postRate <= millis()) {
+  if ((state == STATE_INIT) || lastPost + postRate <= millis()) {
     strcpy(topStatus, "Recalculating...");
     draw();
-    gmapsQuery();
-    lastPost = millis();
-    firstTime = false;
+
+    if (state == STATE_INIT) {
+      Serial.println("Authenticating...");
+      if (deviceAndUserCodeQuery()) {
+        Serial.println("Error sending user auth query");
+        delay(3000);
+      } else {
+        Serial.println("Access Token READY for user approval\n");
+        state = STATE_ACCESS_TOKEN_QUERY;
+      }
+    }
+    if (state == STATE_ACCESS_TOKEN_QUERY) {
+      Serial.println("Trying to acquire access token...");
+      if (accessTokenQuery()) {
+        Serial.println("Error acquiring acess token");
+        delay(5000);
+      } else {
+        Serial.println("AUTHENTICATED\n");
+        state = STATE_AUTHENTICATED;
+      }
+    }
+
+    if (state == STATE_AUTHENTICATED) {
+      gcalQuery();
+      gmapsQuery();
+      lastPost = millis();
+    }
   }
 
   if (lastSerial + serialRate <= millis()) {
