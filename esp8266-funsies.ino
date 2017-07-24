@@ -104,7 +104,7 @@ void draw() {
 
   display.setTextSize(2);
   display.setCursor(0, 8);
-  printCapped(medStatus, 10);
+  printCapped(medStatus, 11);
   display.setTextSize(1);
   display.setCursor(0, 24);
   printCapped(lowStatus, 21);
@@ -131,6 +131,12 @@ void setup() {
   digitalWrite(LED_PIN, HIGH);
   draw();
 }
+
+enum {
+  STATE_INIT,
+  STATE_ACCESS_TOKEN_QUERY,
+  STATE_AUTHENTICATED,
+} state = STATE_INIT;
 
 #define GCAL_HOST "www.googleapis.com"
 #define GCAL_SSL_PORT 443
@@ -242,36 +248,34 @@ void gmapsQuery() {
   */
 }
 
-enum {
-  STATE_INIT,
-  STATE_ACCESS_TOKEN_QUERY,
-  STATE_AUTHENTICATED,
-} state = STATE_INIT;
-
 #define GCAL_SCOPE "https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcalendar"
+#define EEPROM_REFRESH_TOKEN_ADDR 0
+
+GoogleAuthRequest authRequest;
 
 void loop() {
   if ((state == STATE_INIT) || lastPost + postRate <= millis()) {
-    strcpy(topStatus, "Recalculating...");
-    draw();
-
     if (state == STATE_INIT) {
+      strcpy(topStatus, "Authenticating...");
+      draw();
       Serial.println("Authenticating...");
-      if (auth.QueryUserCode(client, GCAL_SCOPE)) {
+      auth.EEPROMAcquire(EEPROM_REFRESH_TOKEN_ADDR);
+      if (auth.QueryRefresh(client) == 0) {
+        state = STATE_AUTHENTICATED;
+      } else if (auth.QueryUserCode(client, GCAL_SCOPE, &authRequest)) {
         Serial.println("Error sending user auth query");
         delay(3000);
       } else {
         Serial.println("Access Token READY for user approval\n");
         state = STATE_ACCESS_TOKEN_QUERY;
+        snprintf(topStatus, sizeof(topStatus), "Enter token below at: %s  ",
+            authRequest.VerifyURLCStr());
+        strcpy(medStatus, authRequest.UserCodeCStr());
       }
-    }
-    if (state == STATE_ACCESS_TOKEN_QUERY) {
-      Serial.println("Trying to acquire access token...");
-      if (auth.QueryAccessToken(client)) {
-        Serial.println("Error acquiring acess token");
-        delay(5000);
-      } else {
+    } else if (state == STATE_ACCESS_TOKEN_QUERY) {
+      if (auth.QueryAccessToken(client, &authRequest) == 0) {
         Serial.println("AUTHENTICATED\n");
+        auth.EEPROMStore(EEPROM_REFRESH_TOKEN_ADDR);
         state = STATE_AUTHENTICATED;
       }
     }
