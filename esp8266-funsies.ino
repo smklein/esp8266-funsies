@@ -19,8 +19,16 @@
 // Https
 #include <WiFiClientSecure.h>
 
+// Calendar
+#include <GoogleCalendarArduino.h>
+
 // Authentication
 #include <GoogleOauthArduino.h>
+
+// Getting time
+#include <time.h>
+// Setting time
+#include <Time.h>
 
 #include "keys.h"
 
@@ -127,9 +135,23 @@ void initHardware() {
 
 void setup() {
   initHardware();
-  connectWiFi();
-  digitalWrite(LED_PIN, HIGH);
+  snprintf(topStatus, sizeof(topStatus), "Initializing...");
+  snprintf(medStatus, sizeof(medStatus), "Wifi");
   draw();
+  connectWiFi();
+  snprintf(medStatus, sizeof(medStatus), "Time");
+  draw();
+  // Without a way to acquire location, we're hardcoding the
+  // timezone as Pacific
+  int pdt_offset_seconds = -7 * 3600;
+  configTime(pdt_offset_seconds, 0, "pool.ntp.org", "time.nist.gov");
+  while (!time(nullptr)) {
+    Serial.println("Setting time...");
+    delay(1000);
+  }
+  setTime(time(nullptr));
+  draw();
+  digitalWrite(LED_PIN, HIGH);
 }
 
 enum {
@@ -138,41 +160,21 @@ enum {
   STATE_AUTHENTICATED,
 } state = STATE_INIT;
 
-#define GCAL_HOST "www.googleapis.com"
-#define GCAL_SSL_PORT 443
-
 void gcalQuery() {
   Serial.println("Querying Google Calendar");
-  String command =
-    "GET https://www.googleapis.com/calendar/v3/calendars/primary/events?" \
-    "orderBy=startTime" \
-    "&singleEvents=true" \
-    "&timeMax=2017-07-05T00%3A00%3A00-07%3A00" \
-    "&timeMin=2017-07-04T00%3A00%3A00-07%3A00";
-
-  command += "&access_token=" + String(auth.AccessToken());
-
-  String body = "";
-
-  if (client.connect(GCAL_HOST, GCAL_SSL_PORT)){
-    Serial.println("... Connected to server");
-    client.println(command);
-
-    long start = millis();
-    while (millis() - start < 1500) {
-      while (client.available()) {
-        char c = client.read();
-        body += c;
-      }
-      if (body != "") {
-        break;
-      }
-    }
-    Serial.println("Message received from query: ");
-    Serial.println(body);
+  GoogleCalendar cal;
+  GoogleCalendarEvent events[5]{};
+  int eventCount = sizeof(events) / sizeof(events[0]);
+  eventCount = cal.ListEvents(client, String(auth.AccessToken()), events, eventCount);
+  if (eventCount < 0) {
+    return;
   }
 
-  // TODO not reading the body correctly here...
+  for (size_t i = 0; i < eventCount; i++) {
+    Serial.println("Event:");
+    Serial.println(events[i].summary);
+    Serial.println(events[i].location);
+  }
 }
 
 void gmapsQuery() {
