@@ -30,7 +30,7 @@
 // Getting time
 #include <time.h>
 // Setting time
-#include <Time.h>
+#include <TimeLib.h>
 
 #include "keys.h"
 
@@ -158,11 +158,11 @@ void setup() {
   // timezone as Pacific
   int pdt_offset_seconds = -7 * 3600;
   configTime(pdt_offset_seconds, 0, "pool.ntp.org", "time.nist.gov");
-  while (!time(nullptr)) {
+  while (!now()) {
     Serial.println("Setting time...");
     delay(1000);
   }
-  setTime(time(nullptr));
+  setTime(now());
   draw();
   digitalWrite(LED_PIN, HIGH);
 }
